@@ -1,0 +1,54 @@
+name: Озвучить тренера
+
+# Запускается только вручную: Actions → «Озвучить тренера» → Run workflow
+on:
+  workflow_dispatch:
+    inputs:
+      voice:
+        description: "Голос Piper"
+        type: choice
+        default: ru_RU-dmitri-medium
+        options:
+          - ru_RU-dmitri-medium
+          - ru_RU-denis-medium
+      force:
+        description: "Переозвучить все фразы заново"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # чтобы сохранить mp3 в репозиторий
+  pages: write      # чтобы попросить GitHub Pages обновить сайт
+
+jobs:
+  voice:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Установить Piper и ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          pip install piper-tts
+      - name: Скачать голос
+        run: python -m piper.download_voices "${{ inputs.voice }}" --data-dir "$RUNNER_TEMP/voices"
+      - name: Озвучить фразы
+        run: |
+          node tools/export_phrases.js
+          python tools/make_voice.py --voice "${{ inputs.voice }}" --data-dir "$RUNNER_TEMP/voices" ${{ inputs.force && '--force' || '' }}
+      - name: Сохранить в репозиторий
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add voice
+          git diff --cached --quiet && exit 0
+          git commit -m "Озвучка тренера"
+          git push
+      - name: Обновить сайт
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/${{ github.repository }}/pages/builds"
